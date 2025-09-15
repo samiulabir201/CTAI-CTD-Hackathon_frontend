@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
 
-// Read backend base URL from env; fallback to same-origin (useful on local proxies)
+// Base API URL: prefer env var, fallback to same-origin (useful locally)
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ||
+  process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "");
 
 export default function Home() {
@@ -25,10 +25,12 @@ export default function Home() {
           core_market: coreMarket || null,
         }),
       });
+
       if (!res.ok) {
         const txt = await res.text();
         throw new Error(`HTTP ${res.status} ${res.statusText}: ${txt}`);
       }
+
       const data = await res.json();
       setResult(data);
     } catch (e) {
@@ -78,11 +80,17 @@ export default function Home() {
       {result && (
         <div className="mt-4 p-4 border rounded bg-gray-50 w-[28rem]">
           {"error" in result ? (
-            <p className="text-red-600"><b>Error:</b> {result.error}</p>
+            <p className="text-red-600">
+              <b>Error:</b> {result.error}
+            </p>
           ) : (
             <>
-              <p><b>MasterItemNo:</b> {result.MasterItemNo}</p>
-              <p><b>QtyShipped:</b> {result.QtyShipped}</p>
+              <p>
+                <b>MasterItemNo:</b> {result.MasterItemNo}
+              </p>
+              <p>
+                <b>QtyShipped:</b> {result.QtyShipped}
+              </p>
               <p className="mt-2 text-sm text-gray-700">
                 <b>uom:</b> {result.uom ?? "—"} &nbsp;&nbsp;
                 <b>core_market:</b> {result.core_market ?? "—"}

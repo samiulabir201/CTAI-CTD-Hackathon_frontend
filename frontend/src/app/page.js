@@ -12,6 +12,7 @@ export default function Home() {
   const [coreMarket, setCoreMarket] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  
 
   const predict = async () => {
     setLoading(true);

@@ -1,7 +1,7 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 
-// Prefer env var, fall back to same-origin (good for local dev)
+// Prefer env var; fall back to same-origin (good for local dev)
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "");
@@ -15,6 +15,22 @@ function Spinner() {
   );
 }
 
+function Bubble({ role, children }) {
+  const isUser = role === "user";
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} my-1`}>
+      <div
+        className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed border
+        ${isUser
+          ? "bg-sky-500 text-white border-sky-400"
+          : "bg-white/10 text-slate-100 border-white/15"}`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [desc, setDesc] = useState("");
   const [uom, setUom] = useState("");
@@ -22,6 +38,19 @@ export default function Home() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  // Chat state
+  const [chatOpen, setChatOpen] = useState(true);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      content:
+        "Hi! I can explain the prediction, suggest vendors/timelines at a high level, and help you interpret QtyShipped. Ask me anything about the result.",
+    },
+  ]);
+  const chatEndRef = useRef(null);
 
   const canSubmit = useMemo(() => desc.trim().length > 0 && !loading, [desc, loading]);
 
@@ -31,7 +60,7 @@ export default function Home() {
     { d: "concrete mix 50lb bag", u: "EA", c: "Future Tech" },
   ];
 
-  const predict = async () => {
+  async function predict() {
     setErr("");
     setResult(null);
     setLoading(true);
@@ -51,22 +80,83 @@ export default function Home() {
       }
       const data = await res.json();
       setResult(data);
+
+      // Seed chat with a quick system line about the new prediction
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: `Noted. Latest prediction → MasterItemNo: ${data.MasterItemNo}, QtyShipped: ${data.QtyShipped}. Ask me for a quick rationale or procurement tips.`,
+        },
+      ]);
     } catch (e) {
       setErr(String(e?.message || e));
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const fillExample = (ex) => {
-    setDesc(ex.d); setUom(ex.u); setCoreMarket(ex.c);
-    setResult(null); setErr("");
-  };
+  function fillExample(ex) {
+    setDesc(ex.d);
+    setUom(ex.u);
+    setCoreMarket(ex.c);
+    setResult(null);
+    setErr("");
+  }
+
+  async function sendChat() {
+    const msg = chatInput.trim();
+    if (!msg) return;
+    setChatInput("");
+    setMessages((m) => [...m, { role: "user", content: msg }]);
+    setChatLoading(true);
+
+    try {
+      const payload = {
+        message: msg,
+        context: result || {}, // {MasterItemNo, QtyShipped, uom, core_market}
+        inputs: { description: desc, uom, core_market: coreMarket },
+      };
+      const res = await fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`HTTP ${res.status}: ${txt}`);
+      }
+      const data = await res.json();
+      setMessages((m) => [...m, { role: "assistant", content: data.answer || "(no answer)" }]);
+    } catch (e) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content:
+            "I couldn't reach the explainer service. Please try again in a moment. (" +
+            String(e?.message || e) +
+            ")",
+        },
+      ]);
+    } finally {
+      setChatLoading(false);
+      // Scroll to bottom of chat
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    }
+  }
+
+  function handleKey(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendChat();
+    }
+  }
 
   return (
     <main className="min-h-svh bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
       {/* Header */}
-      <header className="mx-auto max-w-5xl px-6 py-8 flex items-center justify-between">
+      <header className="mx-auto max-w-6xl px-6 py-8 flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">
           CTAI • CTD Material Forecast
         </h1>
@@ -75,20 +165,19 @@ export default function Home() {
         </span>
       </header>
 
-      {/* Hero */}
-      <section className="mx-auto max-w-5xl px-6 pb-4">
-        <div className="mb-6">
-          <h2 className="text-3xl sm:text-4xl font-bold">Predict Materials & Quantities</h2>
-          <p className="mt-2 text-slate-300">
-            Enter an item description (and optional UOM / Core Market). We’ll return the predicted
-            <span className="font-semibold"> MasterItemNo</span> and <span className="font-semibold">QtyShipped</span>.
-          </p>
-        </div>
-      </section>
-
-      {/* Card */}
-      <section className="mx-auto max-w-5xl px-6 pb-16">
+      {/* Body: two columns on desktop */}
+      <section className="mx-auto max-w-6xl px-6 pb-16 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left: Predictor card */}
         <div className="rounded-3xl bg-white/10 backdrop-blur-md border border-white/10 shadow-2xl p-6 sm:p-8">
+          <div className="mb-6">
+            <h2 className="text-3xl sm:text-4xl font-bold">Predict Materials & Quantities</h2>
+            <p className="mt-2 text-slate-300">
+              Enter an item description (and optional UOM / Core Market). We’ll return the predicted{" "}
+              <span className="font-semibold">MasterItemNo</span> and{" "}
+              <span className="font-semibold">QtyShipped</span>.
+            </p>
+          </div>
+
           {/* Inputs */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="sm:col-span-3">
@@ -151,7 +240,10 @@ export default function Home() {
             </button>
 
             <button
-              onClick={() => { setDesc(""); setUom(""); setCoreMarket(""); setResult(null); setErr(""); }}
+              onClick={() => {
+                setDesc(""); setUom(""); setCoreMarket("");
+                setResult(null); setErr("");
+              }}
               className="rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 px-4 py-3 text-sm transition"
             >
               Clear
@@ -186,22 +278,69 @@ export default function Home() {
               </div>
               <div className="mt-3 text-sm text-slate-300">
                 <span className="mr-4">
-                  <span className="text-slate-400">uom:</span>{" "}
-                  {result.uom ?? "—"}
+                  <span className="text-slate-400">uom:</span> {result.uom ?? "—"}
                 </span>
                 <span>
-                  <span className="text-slate-400">core_market:</span>{" "}
-                  {result.core_market ?? "—"}
+                  <span className="text-slate-400">core_market:</span> {result.core_market ?? "—"}
                 </span>
               </div>
             </div>
           )}
+
+          <p className="mt-6 text-center text-xs text-slate-400">
+            Built for CTAI–CTD Hackathon • Deployed on Vercel + Render
+          </p>
         </div>
 
-        {/* Footer */}
-        <p className="mt-6 text-center text-xs text-slate-400">
-          Built for CTAI–CTD Hackathon • Deployed on Vercel + Render
-        </p>
+        {/* Right: Chatbot panel */}
+        <div className="rounded-3xl bg-white/10 backdrop-blur-md border border-white/10 shadow-2xl p-6 sm:p-8 flex flex-col">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Prediction Explainer</h3>
+            <button
+              onClick={() => setChatOpen((v) => !v)}
+              className="text-xs rounded-full bg-white/10 hover:bg-white/20 border border-white/15 px-3 py-1 transition"
+            >
+              {chatOpen ? "Hide" : "Show"}
+            </button>
+          </div>
+
+          {chatOpen && (
+            <>
+              <div className="mt-4 flex-1 overflow-y-auto pr-1" style={{ minHeight: 260 }}>
+                {messages.map((m, i) => (
+                  <Bubble key={i} role={m.role}>{m.content}</Bubble>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+
+              <div className="mt-3 flex items-end gap-2">
+                <textarea
+                  rows={2}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={handleKey}
+                  placeholder="Ask: why this item? how is quantity estimated? vendor timing tips…"
+                  className="flex-1 resize-none rounded-xl border border-white/20 bg-white/5 px-3 py-2 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                />
+                <button
+                  onClick={sendChat}
+                  disabled={chatLoading || !chatInput.trim()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-600 disabled:opacity-50 px-4 py-2 font-medium transition focus:outline-none focus:ring-2 focus:ring-fuchsia-400"
+                  title="Send"
+                >
+                  {chatLoading ? <Spinner /> : null}
+                  Send
+                </button>
+              </div>
+
+              {!result && (
+                <p className="mt-2 text-xs text-slate-400">
+                  Tip: run a prediction first for the most useful, grounded answers.
+                </p>
+              )}
+            </>
+          )}
+        </div>
       </section>
     </main>
   );

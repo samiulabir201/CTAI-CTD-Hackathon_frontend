@@ -6,13 +6,15 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "");
 
+console.log("API_BASE:", API_BASE);
+
 export default function Home() {
   const [desc, setDesc] = useState("");
   const [uom, setUom] = useState("");
   const [coreMarket, setCoreMarket] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  
+
 
   const predict = async () => {
     setLoading(true);
